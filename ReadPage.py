@@ -11,6 +11,12 @@ import zoneinfo
 
 # Globals
 
+# Path Of Script
+script_dir = Path(__file__).resolve().parent
+
+use_dummy = 1
+dummy_path = script_dir / "DummyLog.html"
+
 pv_name = "PV_Name"
 pv_address = "PV_Address"
 pv_state = "PV_State"
@@ -41,8 +47,6 @@ elevation = 112
 timezone = "Europe/Berlin"
 depression = 6.0
 
-# Path Of Script
-script_dir = Path(__file__).resolve().parent
 
 # Data Path
 data_dir = script_dir / "data"
@@ -80,15 +84,18 @@ s = sun(
     dawn_dusk_depression = float(depression)
 )
 
-subprocess.run(
-    [
-        "curl",
-        "-u", f"{username}:{password}",
-        url,
-        "-o", str(output_file),
-    ],
-    check=True
-)
+if use_dummy:
+    output_file = dummy_path
+else:
+    subprocess.run(
+        [
+            "curl",
+            "-u", f"{username}:{password}",
+            url,
+            "-o", str(output_file),
+        ],
+        check=True
+    )
 
 now = datetime.now()
 read_date = now.strftime("%x")
