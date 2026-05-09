@@ -14,7 +14,7 @@ import zoneinfo
 # Path Of Script
 script_dir = Path(__file__).resolve().parent
 
-use_dummy = 1
+use_dummy = 0
 dummy_path = script_dir / "DummyLog.html"
 
 pv_name = "PV_Name"
@@ -71,6 +71,9 @@ depression = server.get("depression", "").strip().strip('"')
 elevation = server.get("elevation", "").strip().strip('"')
 timezone = server.get("timezone", "").strip().strip('"')
 location = server.get("location", "").strip().strip('"')
+
+debug =config["DEBUG"]
+use_dummy = debug.getboolean("use_dummy", fallback=False)
 
 if not url.startswith(("http://", "https://")):
     url = f"http://{url}"
@@ -252,8 +255,8 @@ if "DC1_Current" in results:
 
 if "DC2_Voltage" in results:
     dc2_voltage = results["DC2_Voltage"]
-if "DC2_Ampere" in results:
-    dc2_current = results["DC2_Ampere"]
+if "DC2_Current" in results:
+    dc2_current = results["DC2_Current"]
 
 if "L1_Voltage" in results:
     l1_voltage = results["L1_Voltage"]
