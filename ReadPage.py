@@ -71,8 +71,13 @@ depression = server.get("depression", "").strip().strip('"')
 elevation = server.get("elevation", "").strip().strip('"')
 timezone = server.get("timezone", "").strip().strip('"')
 location = server.get("location", "").strip().strip('"')
+sunrise = "00:00:00"
+sunset = "00:00:00"
+dawn = "00:00:00"
+noon = "00:00:00"
+dusk = "00:00:00"
 
-debug =config["DEBUG"]
+debug = config["DEBUG"]
 use_dummy = debug.getboolean("use_dummy", fallback=False)
 
 if not url.startswith(("http://", "https://")):
@@ -101,8 +106,8 @@ else:
     )
 
 now = datetime.now()
-read_date = now.strftime("%x")
-read_time = now.strftime("%X")
+read_date = now.strftime("%d.%m.%Y")
+read_time = now.strftime("%H:%M:%S")
 
 # Get List of line numbers from ini to proceed ( [SERVER] goodlines )
 def parse_goodlines(raw: str) -> list[int]:
@@ -141,6 +146,12 @@ def remove_from_first_space(textline: str) -> str:
 
 def remove_from_first_plus(textline: str) -> str:
     pos = textline.find("+")
+    if pos == -1:
+        return textline
+    return textline[:pos]
+
+def remove_from_first_dot(textline: str) -> str:
+    pos = textline.find(".")
     if pos == -1:
         return textline
     return textline[:pos]
@@ -273,6 +284,12 @@ if "L3_Voltage" in results:
 if "L3_Power" in results:
     l3_power = results["L3_Power"]
 
+sunrise = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunrise"]),11)))
+sunset = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunset"]),11)))
+dawn = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dawn"]),11)))
+noon = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["noon"]),11)))
+dusk = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dusk"]), 11)))
+
 def print_debug():
     print()
     print("Location      :", f"{location}")
@@ -282,11 +299,11 @@ def print_debug():
     print("Depression    :", f"{depression}")
     print("Elevation     :", f"{elevation}")
     print()
-    print("Sunrise       :", s["sunrise"])
-    print("Sunset        :", s["sunset"])
-    print("Dawn          :", s["dawn"])
-    print("Noon          :", s["noon"])
-    print("Dusk          :", s["dusk"])
+    print("Sunrise       :", f"{sunrise}")
+    print("Sunset        :", f"{sunset}")
+    print("Dawn          :", f"{dawn}")
+    print("Noon          :", f"{noon}")
+    print("Dusk          :", f"{dusk}")
     print()
     print("PV_Name       :", f"{pv_name}")
     print("PV_State      :", f"{pv_state}")
