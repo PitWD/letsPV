@@ -2,12 +2,15 @@ from pathlib import Path
 import subprocess
 import time
 import configparser
+from typing import Dict, Union
 
 from astral.sun import sun
 from astral import Observer
 from datetime import date
 from datetime import datetime
 import zoneinfo
+
+from db_store import init_db, write_measurement
 
 # Globals
 
@@ -51,10 +54,7 @@ depression = 6.0
 # Data Path
 data_dir = script_dir / "data"
 data_dir.mkdir(exist_ok=True)
-
-# 64-bit timestamp
-time_stamp = time.time_ns()
-output_file = data_dir / f"output_{time_stamp}.html"
+db_file = data_dir / "measurements.sqlite"
 
 # Get url, user and pass from INI
 settings_file = script_dir / "Settings.ini"
@@ -76,59 +76,23 @@ sunset = "00:00:00"
 dawn = "00:00:00"
 noon = "00:00:00"
 dusk = "00:00:00"
+timeformat = server.get("time", "").strip().strip('"')
+dateformat = server.get("date", "").strip().strip('"')
+logging = server.getboolean("logging", fallback=False)
+loggingname = server.get("loggingname", "log").strip().strip('"')
 
 debug = config["DEBUG"]
 use_dummy = debug.getboolean("use_dummy", fallback=False)
-
-if not url.startswith(("http://", "https://")):
-    url = f"http://{url}"
-
-observer = Observer(latitude, longitude, elevation)
-
-s = sun(
-    observer,
-    date = date.today(),
-    tzinfo = zoneinfo.ZoneInfo(timezone),
-    dawn_dusk_depression = float(depression)
-)
-
-if use_dummy:
-    output_file = dummy_path
-else:
-    subprocess.run(
-        [
-            "curl",
-            "-u", f"{username}:{password}",
-            url,
-            "-o", str(output_file),
-        ],
-        check=True
-    )
-
-now = datetime.now()
-read_date = now.strftime("%d.%m.%Y")
-read_time = now.strftime("%H:%M:%S")
-
-# Get List of line numbers from ini to proceed ( [SERVER] goodlines )
-def parse_goodlines(raw: str) -> list[int]:
-    cleaned = raw.strip().strip('"')
-    if not cleaned:
-        return []
-    return [int(item.strip()) for item in cleaned.split(",") if item.strip()]
-
-# Proceed lines 
 
 # *** LINE FUNCTIONS ***
 
 def trim_text(textline: str) -> str:
     return textline.strip(" \t")
 
-
 def remove_left(textline: str, cnt: int) -> str:
     if cnt <= 0:
         return textline
     return textline[cnt:]
-
 
 def remove_right(textline: str, cnt: int) -> str:
     if cnt <= 0:
@@ -136,7 +100,6 @@ def remove_right(textline: str, cnt: int) -> str:
     if cnt >= len(textline):
         return ""
     return textline[:-cnt]
-
 
 def remove_from_first_space(textline: str) -> str:
     pos = textline.find(" ")
@@ -194,7 +157,6 @@ def keep_left_count(textline: str, cnt: int) -> str:
         return textline
     return textline[:cnt]
 
-
 def process_line(textline: str, section: configparser.SectionProxy) -> str | float:
     txt = textline
 
@@ -224,12 +186,59 @@ def process_line(textline: str, section: configparser.SectionProxy) -> str | flo
     return txt
 
 
+observer = Observer(latitude, longitude, elevation)
+
+s = sun(
+    observer,
+    date = date.today(),
+    tzinfo = zoneinfo.ZoneInfo(timezone),
+    dawn_dusk_depression = float(depression)
+)
+
+sunrise = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunrise"]),11)))
+sunset = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunset"]),11)))
+dawn = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dawn"]),11)))
+noon = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["noon"]),11)))
+dusk = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dusk"]), 11)))
+
+# 64-bit timestamp
+time_stamp = time.time_ns()
+output_file = data_dir / f"output_{time_stamp}.html"
+
+if not url.startswith(("http://", "https://")):
+    url = f"http://{url}"
+
+if use_dummy:
+    output_file = dummy_path
+else:
+    subprocess.run(
+        [
+            "curl",
+            "-u", f"{username}:{password}",
+            url,
+            "-o", str(output_file),
+        ],
+        check=True
+    )
+
+now = datetime.now()
+read_date = now.strftime(dateformat)
+read_time = now.strftime(timeformat)
+
+# Get List of line numbers from ini to proceed ( [SERVER] goodlines )
+def parse_goodlines(raw: str) -> list[int]:
+    cleaned = raw.strip().strip('"')
+    if not cleaned:
+        return []
+    return [int(item.strip()) for item in cleaned.split(",") if item.strip()]
+
+# Proceed lines 
 goodlines = parse_goodlines(server.get("goodlines", ""))
 
 with output_file.open("r", encoding="utf-8", errors="replace") as f:
     html_lines = f.readlines()
 
-results: dict[str, str | float] = {}
+results: Dict[str, Union[str, float, int]] = {}
 
 for line_number in goodlines:
     section_name = str(line_number)
@@ -243,6 +252,23 @@ for line_number in goodlines:
     value = process_line(raw_line, section)
     name = section.get("name", section_name).strip().strip('"')
     results[name] = value
+
+# Store one snapshot per run for cross-process reads.
+init_db(db_file)
+write_measurement(db_file, now, results)
+
+# check if loggingname csv exists, if not create it and write header
+if logging:
+    log_file = script_dir / f"{loggingname}.csv"
+    if not log_file.exists():
+        with log_file.open("w", encoding="utf-8") as f:
+            header = "Date,Time,Power_Out_Now,Power_Out_Day,Power_Out_All,DC1_Voltage,DC1_Current,DC2_Voltage,DC2_Current,L1_Voltage,L1_Power,L2_Voltage,L2_Power,L3_Voltage,L3_Power\n"
+            f.write(header)
+
+    with log_file.open("a", encoding="utf-8") as f:
+        log_line = f"{read_date},{read_time},{power_out_now},{power_out_day},{power_out_all},{dc1_voltage},{dc1_current},{dc2_voltage},{dc2_current},{l1_voltage},{l1_power},{l2_voltage},{l2_power},{l3_voltage},{l3_power}\n"
+        f.write(log_line)
+        
 
 # Assign results to global variables
 if "PV_Name" in results:
@@ -283,12 +309,6 @@ if "L3_Voltage" in results:
     l3_voltage = results["L3_Voltage"]
 if "L3_Power" in results:
     l3_power = results["L3_Power"]
-
-sunrise = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunrise"]),11)))
-sunset = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunset"]),11)))
-dawn = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dawn"]),11)))
-noon = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["noon"]),11)))
-dusk = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dusk"]), 11)))
 
 def print_debug():
     print()
