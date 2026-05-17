@@ -1,23 +1,22 @@
 from pathlib import Path
 import subprocess
 import time
-import configparser
 from typing import Dict, Union
+import configparser
 
-from astral.sun import sun
-from astral import Observer
-from datetime import date
 from datetime import datetime
-import zoneinfo
+
+from dumb_parser import process_line, remove_from_first_dot, remove_from_first_plus, remove_left
 
 from db_store import init_db, write_measurement
 
-# Globals
 
 # Path Of Script
 script_dir = Path(__file__).resolve().parent
 
-use_dummy = 0
+# Globals
+
+dummy_use = 0
 dummy_path = script_dir / "DummyLog.html"
 
 pv_name = "PV_Name"
@@ -43,163 +42,31 @@ l2_power = 0
 l3_voltage = 0
 l3_power = 0
 
-
-latitude = 50.1109    # Frankfurt
-longitude = 8.6821
-elevation = 112
-timezone = "Europe/Berlin"
-depression = 6.0
-
-
-# Data Path
-data_dir = script_dir / "data"
-data_dir.mkdir(exist_ok=True)
-db_file = data_dir / "measurements.sqlite"
-
-# Get url, user and pass from INI
 settings_file = script_dir / "Settings.ini"
 config = configparser.ConfigParser()
 config.read(settings_file, encoding="utf-8")
 
+# Get url, user and pass from INI
 server = config["SERVER"]
 url = server.get("url", "").strip().strip('"')
 username = server.get("user", "").strip().strip('"')
 password = server.get("pass", "").strip().strip('"')
-latitude = server.get("latitude", "").strip().strip('"')
-longitude = server.get("longitude", "").strip().strip('"')
-depression = server.get("depression", "").strip().strip('"')
-elevation = server.get("elevation", "").strip().strip('"')
-timezone = server.get("timezone", "").strip().strip('"')
-location = server.get("location", "").strip().strip('"')
-sunrise = "00:00:00"
-sunset = "00:00:00"
-dawn = "00:00:00"
-noon = "00:00:00"
-dusk = "00:00:00"
 timeformat = server.get("time", "").strip().strip('"')
 dateformat = server.get("date", "").strip().strip('"')
-logging = server.getboolean("logging", fallback=False)
-loggingname = server.get("loggingname", "log").strip().strip('"')
+
+logging = config["LOGGING"]
+logging_csv = logging.getboolean("logging_csv", fallback=False)
+logging_db = logging.getboolean("logging_db", fallback=False)
+logging_name = logging.get("logging_name", "log").strip().strip('"')
 
 debug = config["DEBUG"]
-use_dummy = debug.getboolean("use_dummy", fallback=False)
+dummy_use = debug.getboolean("dummy_use", fallback=False)
+debug_print = debug.getboolean("debug_print", fallback=False)
 
-# *** LINE FUNCTIONS ***
-
-def trim_text(textline: str) -> str:
-    return textline.strip(" \t")
-
-def remove_left(textline: str, cnt: int) -> str:
-    if cnt <= 0:
-        return textline
-    return textline[cnt:]
-
-def remove_right(textline: str, cnt: int) -> str:
-    if cnt <= 0:
-        return textline
-    if cnt >= len(textline):
-        return ""
-    return textline[:-cnt]
-
-def remove_from_first_space(textline: str) -> str:
-    pos = textline.find(" ")
-    if pos == -1:
-        return textline
-    return textline[:pos]
-
-def remove_from_first_plus(textline: str) -> str:
-    pos = textline.find("+")
-    if pos == -1:
-        return textline
-    return textline[:pos]
-
-def remove_from_first_dot(textline: str) -> str:
-    pos = textline.find(".")
-    if pos == -1:
-        return textline
-    return textline[:pos]
-
-def comma_to_dot(textline: str) -> str:
-    return textline.replace(",", ".")
-
-def text_to_double(textline: str) -> float:
-    try:
-        prepared = comma_to_dot(trim_text(textline))
-        return float(prepared)
-    except:
-        return 0.0
-
-def text_to_int(textline: str) -> int:
-    try:
-        prepared = comma_to_dot(trim_text(textline))
-        return int(prepared)
-    except:
-        return 0
-
-def remove_left_text(textline: str, marker: str) -> str:
-    if not marker:
-        return textline
-    pos = textline.find(marker)
-    if pos == -1:
-        return textline
-    return textline[pos + len(marker):]
-
-def remove_right_text(textline: str, marker: str) -> str:
-    if not marker:
-        return textline
-    pos = textline.find(marker)
-    if pos == -1:
-        return textline
-    return textline[:pos]
-
-def keep_left_count(textline: str, cnt: int) -> str:
-    if cnt <= 0:
-        return textline
-    return textline[:cnt]
-
-def process_line(textline: str, section: configparser.SectionProxy) -> str | float:
-    txt = textline
-
-    if section.getboolean("txt_trim", fallback=False):
-        txt = trim_text(txt)
-
-    txt = remove_left(txt, section.getint("txt_remove_left_cnt", fallback=0))
-    txt = remove_left_text(txt, section.get("txt_remove_left_txt", fallback="").strip().strip('"'))
-
-    txt = remove_right(txt, section.getint("txt_remove_right_cnt", fallback=0))
-    txt = remove_right_text(txt, section.get("txt_remove_right_txt", fallback="").strip().strip('"'))
-
-    txt = keep_left_count(txt, section.getint("txt_count", fallback=0))
-
-    if section.getboolean("txt_up_to_space", fallback=False):
-        txt = remove_from_first_space(txt)
-
-    if section.getboolean("txt_change_comma", fallback=False):
-        txt = comma_to_dot(txt)
-
-    if section.getboolean("txt_to_val", fallback=False):
-        return text_to_double(txt)
-
-    if section.getboolean("txt_to_int", fallback=False):
-        return text_to_int(txt)
-
-    return txt
-
-
-observer = Observer(latitude, longitude, elevation)
-
-s = sun(
-    observer,
-    date = date.today(),
-    tzinfo = zoneinfo.ZoneInfo(timezone),
-    dawn_dusk_depression = float(depression)
-)
-
-sunrise = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunrise"]),11)))
-sunset = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["sunset"]),11)))
-dawn = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dawn"]),11)))
-noon = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["noon"]),11)))
-dusk = remove_from_first_dot(remove_from_first_plus(remove_left(str(s["dusk"]), 11)))
+# Data Path
+data_dir = script_dir / "data"
+data_dir.mkdir(exist_ok=True)
+db_file = data_dir / f"{logging_name}.sqlite"
 
 # 64-bit timestamp
 time_stamp = time.time_ns()
@@ -208,18 +75,35 @@ output_file = data_dir / f"output_{time_stamp}.html"
 if not url.startswith(("http://", "https://")):
     url = f"http://{url}"
 
-if use_dummy:
+if dummy_use:
     output_file = dummy_path
 else:
-    subprocess.run(
-        [
-            "curl",
-            "-u", f"{username}:{password}",
-            url,
+    if debug_print:
+        subprocess.run(
+            [
+                "curl",
+                "-u", f"{username}:{password}",
+                url,
             "-o", str(output_file),
         ],
         check=True
-    )
+        )
+    else:
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-u", f"{username}:{password}",
+                url,
+            "-o", str(output_file),
+            ],
+        check=True
+        )
+    
+# if output_file does not exist, exit with error
+if not output_file.exists():
+    print(f"Error: Output file {output_file} does not exist.")
+    exit(1)
 
 now = datetime.now()
 read_date = now.strftime(dateformat)
@@ -240,6 +124,9 @@ with output_file.open("r", encoding="utf-8", errors="replace") as f:
 
 results: Dict[str, Union[str, float, int]] = {}
 
+results["Date"] = read_date
+results["Time"] = read_time
+
 for line_number in goodlines:
     section_name = str(line_number)
     if section_name not in config:
@@ -253,13 +140,59 @@ for line_number in goodlines:
     name = section.get("name", section_name).strip().strip('"')
     results[name] = value
 
-# Store one snapshot per run for cross-process reads.
-init_db(db_file)
-write_measurement(db_file, now, results)
+# Remove output file if not dummy
+if not dummy_use:
+    output_file.unlink()
 
-# check if loggingname csv exists, if not create it and write header
-if logging:
-    log_file = script_dir / f"{loggingname}.csv"
+# Assign results to global variables - just needed if debug_print is enabled, or csv active.
+if debug_print or logging_csv:
+    if "PV_Name" in results:
+        pv_name = results["PV_Name"]
+    if "PV_Address" in results:
+        pv_address = results["PV_Address"]
+    if "PV_State" in results:
+        pv_state = results["PV_State"]
+
+    if "Power_Out_Now" in results:
+        power_out_now = results["Power_Out_Now"]
+    if "Power_Out_Day" in results:
+        power_out_day = results["Power_Out_Day"]
+    if "Power_Out_All" in results:
+        power_out_all = results["Power_Out_All"]
+
+    if "DC1_Voltage" in results:
+        dc1_voltage = results["DC1_Voltage"]
+    if "DC1_Current" in results:
+        dc1_current = results["DC1_Current"]
+
+    if "DC2_Voltage" in results:
+        dc2_voltage = results["DC2_Voltage"]
+    if "DC2_Current" in results:
+        dc2_current = results["DC2_Current"]
+
+    if "L1_Voltage" in results:
+        l1_voltage = results["L1_Voltage"]
+    if "L1_Power" in results:
+        l1_power = results["L1_Power"]
+
+    if "L2_Voltage" in results:
+        l2_voltage = results["L2_Voltage"]
+    if "L2_Power" in results:
+        l2_power = results["L2_Power"]
+
+    if "L3_Voltage" in results:
+        l3_voltage = results["L3_Voltage"]
+    if "L3_Power" in results:
+        l3_power = results["L3_Power"]
+
+# Store in db
+if logging_db:
+    init_db(db_file)
+    write_measurement(db_file, now, results)
+
+# Store in CSV
+if logging_csv:
+    log_file = data_dir / f"{logging_name}.csv"
     if not log_file.exists():
         with log_file.open("w", encoding="utf-8") as f:
             header = "Date,Time,Power_Out_Now,Power_Out_Day,Power_Out_All,DC1_Voltage,DC1_Current,DC2_Voltage,DC2_Current,L1_Voltage,L1_Power,L2_Voltage,L2_Power,L3_Voltage,L3_Power\n"
@@ -269,62 +202,7 @@ if logging:
         log_line = f"{read_date},{read_time},{power_out_now},{power_out_day},{power_out_all},{dc1_voltage},{dc1_current},{dc2_voltage},{dc2_current},{l1_voltage},{l1_power},{l2_voltage},{l2_power},{l3_voltage},{l3_power}\n"
         f.write(log_line)
         
-
-# Assign results to global variables
-if "PV_Name" in results:
-    pv_name = results["PV_Name"]
-if "PV_Address" in results:
-    pv_address = results["PV_Address"]
-if "PV_State" in results:
-    pv_state = results["PV_State"]
-
-if "Power_Out_Now" in results:
-    power_out_now = results["Power_Out_Now"]
-if "Power_Out_Day" in results:
-    power_out_day = results["Power_Out_Day"]
-if "Power_Out_All" in results:
-    power_out_all = results["Power_Out_All"]
-
-if "DC1_Voltage" in results:
-    dc1_voltage = results["DC1_Voltage"]
-if "DC1_Current" in results:
-    dc1_current = results["DC1_Current"]
-
-if "DC2_Voltage" in results:
-    dc2_voltage = results["DC2_Voltage"]
-if "DC2_Current" in results:
-    dc2_current = results["DC2_Current"]
-
-if "L1_Voltage" in results:
-    l1_voltage = results["L1_Voltage"]
-if "L1_Power" in results:
-    l1_power = results["L1_Power"]
-
-if "L2_Voltage" in results:
-    l2_voltage = results["L2_Voltage"]
-if "L2_Power" in results:
-    l2_power = results["L2_Power"]
-
-if "L3_Voltage" in results:
-    l3_voltage = results["L3_Voltage"]
-if "L3_Power" in results:
-    l3_power = results["L3_Power"]
-
 def print_debug():
-    print()
-    print("Location      :", f"{location}")
-    print("TimeZone      :", f"{timezone}")
-    print("Latitude      :", f"{latitude}")
-    print("Longitude     :", f"{longitude}")
-    print("Depression    :", f"{depression}")
-    print("Elevation     :", f"{elevation}")
-    print()
-    print("Sunrise       :", f"{sunrise}")
-    print("Sunset        :", f"{sunset}")
-    print("Dawn          :", f"{dawn}")
-    print("Noon          :", f"{noon}")
-    print("Dusk          :", f"{dusk}")
-    print()
     print("PV_Name       :", f"{pv_name}")
     print("PV_State      :", f"{pv_state}")
     print("PV_Address    :", f"{pv_address}")
@@ -349,4 +227,5 @@ def print_debug():
     print("L3_Power      :", f"{l3_power}", "W")
     print()
 
-print_debug()
+if debug_print:
+    print_debug()

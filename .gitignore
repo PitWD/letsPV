@@ -6,6 +6,7 @@ __pycache__/
 data/
 private.ini
 log.csv
+.ds_store
 # C extensions
 *.so
 
