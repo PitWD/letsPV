@@ -13,9 +13,9 @@ from db_store import init_db, write_measurement
 
 # Path Of Script
 script_dir = Path(__file__).resolve().parent
+debug_log_file = script_dir / "debug.log"    
 
 # Globals
-
 dummy_use = 0
 dummy_path = script_dir / "DummyLog.html"
 
@@ -62,15 +62,28 @@ logging_name = logging.get("logging_name", "log").strip().strip('"')
 debug = config["DEBUG"]
 dummy_use = debug.getboolean("dummy_use", fallback=False)
 debug_print = debug.getboolean("debug_print", fallback=False)
+debug_log = debug.getboolean("debug_log", fallback=False)
 
 # Data Path
 data_dir = script_dir / "data"
 data_dir.mkdir(exist_ok=True)
 db_file = data_dir / f"{logging_name}.sqlite"
 
-# 64-bit timestamp
-time_stamp = time.time_ns()
-output_file = data_dir / f"output_{time_stamp}.html"
+now = datetime.now()
+read_date = now.strftime(dateformat)
+read_time = now.strftime(timeformat)
+output_file = data_dir / f"output_{read_date}_{read_time}.html"
+
+
+def append_debug_log(message: str) -> None:
+    if not debug_log:
+        return
+    debug_log_file.touch(exist_ok=True)
+    with debug_log_file.open("a", encoding="utf-8") as f:
+        f.write(f"{read_date} {read_time} {message}\n")
+
+
+append_debug_log("Debug log started")
 
 if not url.startswith(("http://", "https://")):
     url = f"http://{url}"
@@ -79,35 +92,39 @@ if dummy_use:
     output_file = dummy_path
 else:
     if debug_print:
-        subprocess.run(
-            [
-                "curl",
-                "-u", f"{username}:{password}",
-                url,
-            "-o", str(output_file),
-        ],
-        check=True
-        )
+        try:
+            subprocess.run(
+                [
+                    "curl",
+                    "-u", f"{username}:{password}",
+                    url,
+                "-o", str(output_file),
+            ],
+            check=True
+            )
+        except:
+            append_debug_log("CURLing (debug) failed")
+            exit(1)
     else:
-        subprocess.run(
-            [
-                "curl",
-                "-s",
-                "-u", f"{username}:{password}",
-                url,
+        try:
+            subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "-u", f"{username}:{password}",
+                    url,
             "-o", str(output_file),
             ],
         check=True
         )
-    
+        except:
+            append_debug_log("CURLing (silent) failed")
+            exit(1)
+
 # if output_file does not exist, exit with error
 if not output_file.exists():
-    print(f"Error: Output file {output_file} does not exist.")
+    append_debug_log(f"Error: Output file {output_file} does not exist.")
     exit(1)
-
-now = datetime.now()
-read_date = now.strftime(dateformat)
-read_time = now.strftime(timeformat)
 
 # Get List of line numbers from ini to proceed ( [SERVER] goodlines )
 def parse_goodlines(raw: str) -> list[int]:
@@ -229,3 +246,5 @@ def print_debug():
 
 if debug_print:
     print_debug()
+
+append_debug_log("Debug log finished")
