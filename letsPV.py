@@ -55,6 +55,11 @@ logging_freq_day = logging.getint("logging_freq_day", fallback=30)
 logging_freq_night = logging.getint("logging_freq_night", fallback=600)
 logging_freq_error = logging.getint("logging_freq_error", fallback=15)
 
+debug = config["DEBUG"]
+dummy_use = debug.getboolean("dummy_use", fallback=False)
+debug_print = debug.getboolean("debug_print", fallback=False)
+debug_log = debug.getboolean("debug_log", fallback=False)
+
 stdin_fd = None
 stdin_settings = None
 
@@ -164,5 +169,5 @@ while True:
     if should_exit():
         break
     
-    time.sleep(0.1)
+    time.sleep(0.33)
 
